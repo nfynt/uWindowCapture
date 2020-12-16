@@ -307,9 +307,9 @@ UINT Window::GetPixel(int x, int y) const
 }
 
 
-bool Window::GetPixels(BYTE* output, int x, int y, int width, int height) const
+bool Window::GetPixels(BYTE* output, int x, int y, int width, int height, bool flipY) const
 {
-    return windowTexture_->GetPixels(output, x, y, width, height);
+    return windowTexture_->GetPixels(output, x, y, width, height, flipY);
 }
 
 

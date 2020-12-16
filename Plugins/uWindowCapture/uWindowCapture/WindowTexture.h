@@ -47,7 +47,7 @@ public:
     BYTE* GetBuffer();
 
     UINT GetPixel(int x, int y) const;
-    bool GetPixels(BYTE* output, int x, int y, int width, int height) const;
+    bool GetPixels(BYTE* output, int x, int y, int width, int height, bool flipY=false) const;
 
 private:
     void CreateBitmapIfNeeded(HDC hDc, UINT width, UINT height);

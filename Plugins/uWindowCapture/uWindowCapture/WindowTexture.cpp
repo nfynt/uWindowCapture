@@ -476,7 +476,7 @@ UINT WindowTexture::GetPixel(int x, int y) const
 }
 
 
-bool WindowTexture::GetPixels(BYTE* output, int x, int y, int width, int height) const
+bool WindowTexture::GetPixels(BYTE* output, int x, int y, int width, int height, bool flipY) const
 {
     if (!buffer_)
     {
@@ -486,10 +486,10 @@ bool WindowTexture::GetPixels(BYTE* output, int x, int y, int width, int height)
 
     int bufferWidth = bufferWidth_.load();
     int bufferHeight = bufferHeight_.load();
-    if (x < 0 || x + width >= bufferWidth || y < 0 || y + height >= bufferHeight)
+    if (x < 0 || x + width > bufferWidth || y < 0 || y + height > bufferHeight)
     {
         Debug::Error("The given range is out of the buffer area: x=", x, ", y=", y, ", width=", width, ", height=", height);
-        Debug::Error("The buffer width=", bufferWidth_, ", height=", bufferHeight_);
+        Debug::Error("The buffer width=", bufferWidth, ", height=", bufferHeight);
         return false;
     }
 
@@ -503,7 +503,7 @@ bool WindowTexture::GetPixels(BYTE* output, int x, int y, int width, int height)
             for (int c = 0; c < rgba; ++c)
             {
                 const int indexOut = i + j * width;
-                const int indexIn = (x + i) + (y + (height - 1 - j)) * bufferWidth_;
+                const int indexIn = (x + i) + (y + (flipY?j:(height - 1 - j))) * bufferWidth_;
                 output[indexOut * rgba + 0] = buffer_[indexIn * rgba + 2];
                 output[indexOut * rgba + 1] = buffer_[indexIn * rgba + 1];
                 output[indexOut * rgba + 2] = buffer_[indexIn * rgba + 0];

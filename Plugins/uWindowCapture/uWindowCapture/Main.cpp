@@ -15,6 +15,8 @@
 #include "WindowTexture.h"
 #include "WindowManager.h"
 
+#include "RtspStreaming.h"
+
 #include "Util.h"
 
 #pragma comment(lib, "dxgi.lib")
@@ -48,6 +50,9 @@ extern "C"
 
         WindowManager::Create();
         WindowManager::Get().Initialize();
+
+        RtspStreaming::Create();
+        RtspStreaming::Get().Initialize();
     }
 
     UNITY_INTERFACE_EXPORT void UNITY_INTERFACE_API UwcFinalize()
@@ -59,6 +64,9 @@ extern "C"
         WindowManager::Destroy();
 
         MessageManager::Destroy();
+
+        RtspStreaming::Get().Finalize();
+        RtspStreaming::Destroy();
 
         Debug::Finalize();
     }
@@ -186,6 +194,7 @@ extern "C"
     {
         if (WindowManager::IsNull()) return;
         WindowManager::GetCaptureManager()->RequestCapture(id, priority);
+        
     }
 
     UNITY_INTERFACE_EXPORT void UNITY_INTERFACE_API UwcRequestCaptureIcon(int id)
@@ -690,5 +699,15 @@ extern "C"
     UNITY_INTERFACE_EXPORT UINT UNITY_INTERFACE_API UwcGetScreenHeight()
     {
         return ::GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    }
+
+    UNITY_INTERFACE_EXPORT bool UNITY_INTERFACE_API StartRTSPStream(int id, char* rtspURL, bool enableEncryption) 
+    {
+        return RtspStreaming::Get().StartStreaming(id, rtspURL, enableEncryption);
+    }
+
+    UNITY_INTERFACE_EXPORT bool UNITY_INTERFACE_API StopRTSPStream()
+    {
+        return RtspStreaming::Get().StopStreaming();
     }
 }

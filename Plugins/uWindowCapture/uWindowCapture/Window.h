@@ -88,7 +88,7 @@ public:
     bool GetCursorDraw() const;
 
     UINT GetPixel(int x, int y) const;
-    bool GetPixels(BYTE* output, int x, int y, int width, int height) const;
+    bool GetPixels(BYTE* output, int x, int y, int width, int height, bool flipY=false) const;
 
     void RequestUpdateTitle();
 
