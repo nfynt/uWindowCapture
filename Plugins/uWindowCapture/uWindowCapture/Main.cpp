@@ -701,9 +701,25 @@ extern "C"
         return ::GetSystemMetrics(SM_CYVIRTUALSCREEN);
     }
 
-    UNITY_INTERFACE_EXPORT bool UNITY_INTERFACE_API StartRTSPStream(int id, char* rtspURL, bool enableEncryption) 
+    //UNITY_INTERFACE_EXPORT void UNITY_INTERFACE_API SetEncryptionOptions(bool encrypt, char* key = nullptr, char* iv = nullptr)
+    //{
+    //    RtspStreaming::Get().SetEncryptionOptions(encrypt, key, iv);
+    //}
+
+    UNITY_INTERFACE_EXPORT bool UNITY_INTERFACE_API StartRTSPStream(int id, char* rtspURL, int target_fps) 
     {
-        return RtspStreaming::Get().StartStreaming(id, rtspURL, enableEncryption);
+        return RtspStreaming::Get().StartStreaming(id, rtspURL, target_fps, 0, 0);
+    }
+
+    UNITY_INTERFACE_EXPORT bool UNITY_INTERFACE_API StartRTSPStreamWithRes(int id, char* rtspURL, int target_fps, int width, int height)
+    {
+        return RtspStreaming::Get().StartStreaming(id, rtspURL, target_fps, width, height);
+    }
+
+    
+    UNITY_INTERFACE_EXPORT void UNITY_INTERFACE_API RTSPStreamInterrupted(callback_t callback)
+    {
+        RtspStreaming::rtsp_interrupt_cb = callback;
     }
 
     UNITY_INTERFACE_EXPORT bool UNITY_INTERFACE_API StopRTSPStream()

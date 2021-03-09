@@ -22,11 +22,14 @@ extern "C"
 #include "libswresample/swresample.h"
 #include "libavresample/avresample.h"
 #include "libswscale/swscale.h"
+//#include "libavutil/aes.h"
 };
 
 const AVPixelFormat src_pix_fmt = AV_PIX_FMT_RGBA;	//Id3d11texture2D buffer format
 const AVPixelFormat target_pix_fmt = AV_PIX_FMT_YUV420P;
 const AVCodecID target_codec_id = AV_CODEC_ID_H264;
+
+typedef void(__stdcall* callback_t)(LPCTSTR str);
 
 class RtspStreaming
 {
@@ -35,13 +38,18 @@ class RtspStreaming
 public:
 	void Initialize();
 	void Finalize();
-	bool StartStreaming(int id, const char* url, bool encypt);
+	void SetEncryptionOptions(bool encrypt, const char* key = nullptr, const char* iv = nullptr);
+	bool StartStreaming(int id, const char* url, int target_fps, int width, int height);
 	bool StopStreaming();
+	void EncryptAVPacket(AVPacket* pkt);
 	
 	static bool IsConfigured() { return configured; }
 	static bool IsStreaming() { return is_streaming; }
 	static int WindowId() { return win_id; }
 	static std::shared_ptr<Window> ActiveWindow() { return active_winptr; }
+
+	//interrupt callback for Unity3d
+	static callback_t rtsp_interrupt_cb;
 
 private:
 	int width, height;
@@ -49,6 +57,11 @@ private:
 	char* rtsp_url; 
 	static bool configured;
 	static bool is_streaming;
+
+	//static bool encryption_enabled;
+	//static const char* enc_key;
+	//static const char* enc_iv;	//initialization vector for CBC mode, if NULL then ECB will be used
+	//static AVAES* aves;
 
 	static int win_id;
 	static std::shared_ptr<Window> active_winptr;
@@ -62,7 +75,6 @@ private:
 
 protected:
 	//char* auth_user, * auth_pass;
-	bool encryption_enabled;
 	AVFormatContext* ofmt_ctx;
 
 	//Video stream params

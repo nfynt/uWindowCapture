@@ -1,7 +1,11 @@
 #include "RtspStreaming.h"
 
+#include <limits>
+
 #include "WindowManager.h"
 #include "Debug.h"
+
+using std::chrono::steady_clock;
 
 UWC_SINGLETON_INSTANCE(RtspStreaming)
 
@@ -9,16 +13,25 @@ bool RtspStreaming::configured;
 bool RtspStreaming::is_streaming;
 int RtspStreaming::win_id;
 std::shared_ptr<Window> RtspStreaming::active_winptr;
+callback_t RtspStreaming::rtsp_interrupt_cb;
+bool init_rtsp_header;
+steady_clock::time_point start_time;   //time when stream start was attempted
+
+//Encryption params
+//bool RtspStreaming::encryption_enabled;
+//const char* RtspStreaming::enc_key;
+//const char* RtspStreaming::enc_iv;
+//AVAES* RtspStreaming::aves;
 
 void RtspStreaming::Initialize()
 {
     is_streaming = false;
-    //set default resolution to FHD
-    width = 1920;    height = 1080;
+    //set default resolution to HD
+    width = 1280;    height = 720;
     stream_fps = 24;
     configured = false;
     is_streaming = false;
-
+    init_rtsp_header = false;
     av_register_all();
     avformat_network_init();
 
@@ -45,7 +58,44 @@ AVFrame* AllocateFrameBuffer(AVCodecContext* codec_ctx, double width, double hei
     return frame;
 }
 
+int HeaderInterrupt_CB(void* ctx)
+{
+    AVFormatContext* formatContext = reinterpret_cast<AVFormatContext*>(ctx);
+    //check for avio_open? if used
+    //check for creating rtsp header
+    if (init_rtsp_header)
+    {
+        //timeout after 5 seconds of no activity
+        std::chrono::duration<double> d = std::chrono::duration_cast<std::chrono::duration<double>>(steady_clock::now() - start_time);
+        if (d.count() > 5.0)
+            return 1;
+    }
+    return 0;
+}
+
+inline bool CompareDoubles2(double A, double B)
+{
+    return (fabs(A - B) < DBL_EPSILON);
+}
+
+//void RtspStreaming::EncryptAVPacket(AVPacket* pkt)
+//{
+//    int size = pkt->size;
+//    int count = 0;  //no of 16 byte blocks
+//    if (size % 16 == 0)
+//        count = size / 16;
+//    else
+//    {
+//        av_grow_packet(pkt, size % 16);
+//        size = pkt->size;
+//        count = size / 16;
+//    }
+//    
+//    av_aes_crypt(aves, pkt->data, pkt->data, count, (uint8_t*)enc_iv, 0);
+//}
+
 void RtspStream(AVFormatContext* ofmt_ctx, AVStream* vid_stream, AVCodecContext* vid_codec_ctx, char* rtsp_url)
+    //bool encrypt=false, AVAES* aves=nullptr, char* iv=nullptr)
 {
     printf("Output stream info:\n");
     av_dump_format(ofmt_ctx, 0, rtsp_url, 1);
@@ -74,10 +124,21 @@ void RtspStream(AVFormatContext* ofmt_ctx, AVStream* vid_stream, AVCodecContext*
         return;
     }
 
+    start_time = steady_clock::now();
+    init_rtsp_header = true;
+
+    // get's stuck in writing header is the server is not running
     if (avformat_write_header(ofmt_ctx, NULL) < 0) {
         Debug::Error("Error occurred when writing header");
+        init_rtsp_header = false;
+        av_frame_free(&frame);
+        RtspStreaming::rtsp_interrupt_cb(TEXT("Failed during writing RTSP header"));
         return;
     }
+    Debug::Log("done writing header");
+    init_rtsp_header = false;
+    //ofmt_ctx->interrupt_callback.callback = nullptr;
+    //ofmt_ctx->interrupt_callback.opaque = nullptr;
 
     int frame_cnt = 0;
     //av start time in microseconds
@@ -168,7 +229,10 @@ void RtspStream(AVFormatContext* ofmt_ctx, AVStream* vid_stream, AVCodecContext*
 
         //pkt->pos = -1;
 
-        //Debug::Log(video_time.count());
+        /*if (encrypt)
+        {
+            RtspStreaming::Get().EncryptAVPacket(pkt);
+        }*/
         //write frame and send
         if (av_interleaved_write_frame(ofmt_ctx, pkt)<0)
         {
@@ -195,7 +259,7 @@ void RtspStream(AVFormatContext* ofmt_ctx, AVStream* vid_stream, AVCodecContext*
     //printf("streaming thread CLOSED!\n");
 }
 
-bool RtspStreaming::StartStreaming(int id, const char* url, bool encrypt)
+bool RtspStreaming::StartStreaming(int id, const char* url, int target_fps, int target_width, int target_height)
 {
     win_id = id;
     active_winptr = WindowManager::Get().GetWindow(id);
@@ -215,11 +279,17 @@ bool RtspStreaming::StartStreaming(int id, const char* url, bool encrypt)
     rtsp_url = (char*)url;
     //auth_user = (char*)user;
     //auth_pass = (char*)pass;
-    encryption_enabled = encrypt;
+    stream_fps = target_fps;
+
+    if (target_width > 0 && !CompareDoubles2(active_winptr->GetTextureWidth() / active_winptr->GetTextureHeight(), target_width / target_height))
+    {
+        Debug::Error("target aspect ratio doesn't match that of selected window");
+        return false;
+    }
 
     //set video resolution from texture prop
-    width = active_winptr->GetTextureWidth();
-    height = active_winptr->GetTextureHeight();
+    width = (target_width > 0) ? target_width : active_winptr->GetTextureWidth();
+    height = (target_height > 0) ? target_height : active_winptr->GetTextureHeight();
     Debug::Log("win id: ",win_id,"  res: ", width,"x", height);
 
     if (!SetupStreaming())
@@ -235,11 +305,11 @@ bool RtspStreaming::StartStreaming(int id, const char* url, bool encrypt)
 bool RtspStreaming::StopStreaming()
 {
     RtspStreaming::is_streaming = false;
-    Debug::Log("stopping stream: ", RtspStreaming::IsStreaming(),"; waiting for thread to stop");
+    Debug::Log("stopping stream: ", RtspStreaming::IsStreaming(), ";\nwaiting for thread to stop ");
     //stop and wait for stream thread to finish
     if (stream_th.joinable())
         stream_th.join();
-
+    
     //clear video stream and context
     //if (vid_codec_ctx) {
     //    avcodec_close(vid_codec_ctx); //printf("avcodec closed\n");
@@ -265,14 +335,14 @@ bool RtspStreaming::SetupStreaming()
     avformat_alloc_output_context2(&ofmt_ctx, nullptr, "rtsp", rtsp_url); //RTSP
     if (!ofmt_ctx)
     {
-        Debug::Error("Could not deduce output format from file extension: using mpeg.\n");
+        Debug::Error("Could not allocate RTSP context.\n");
         //flv-rtmp, mpegts-udp
-        avformat_alloc_output_context2(&ofmt_ctx, nullptr, "mpeg", rtsp_url);
-        //return false;
+        //avformat_alloc_output_context2(&ofmt_ctx, nullptr, "mpeg", rtsp_url);
+        return false;
     }
     if (!ofmt_ctx || !ofmt_ctx->oformat)
     {
-        Debug::Error("Error creating outformat\n");
+        Debug::Error("Error creating out format\n");
         return false;
     }
 
@@ -286,13 +356,18 @@ bool RtspStreaming::SetupStreaming()
         }
     }
 
-    vid_codec = avcodec_find_encoder(ofmt_ctx->oformat->video_codec); //crashes: mpeg4 codec type/id mismatch
-    //vid_codec = avcodec_find_encoder(target_codec_id);  //fails at avcodec_open2
+    //create new interrupt callback for libav
+    ofmt_ctx->interrupt_callback.callback = HeaderInterrupt_CB;
+    ofmt_ctx->interrupt_callback.opaque = &ofmt_ctx;
+
+    //vid_codec = avcodec_find_encoder(ofmt_ctx->oformat->video_codec); //crashes: mpeg4 codec type/id mismatch
+    vid_codec = avcodec_find_encoder(target_codec_id);  
     if (!vid_codec)
     {
         Debug::Error("Failed to find video encoder: ",avcodec_get_name(ofmt_ctx->oformat->video_codec));
         return false;
     }
+    ofmt_ctx->oformat->video_codec = target_codec_id;
     Debug::Log("Using video codec: ", avcodec_get_name(vid_codec->id));
     vid_stream = avformat_new_stream(ofmt_ctx,vid_codec);
     vid_codec_ctx = avcodec_alloc_context3(vid_codec);
@@ -323,13 +398,19 @@ bool RtspStreaming::InitializeVidStream(AVStream* stream, AVCodecContext* codec_
     AVDictionary* codec_options = nullptr;
     av_dict_set(&codec_options, "-c:v", "libx264", 0);
     av_dict_set(&codec_options, "tune", "zerolatency", 0);
-    //av_dict_set(&codec_options, "threads", "2", 0);
-    //av_dict_set(&codec_options, "muxdelay", "0.1", 0);
+    av_dict_set(&codec_options, "threads", "2", 0);
+    av_dict_set(&codec_options, "muxdelay", "0.1", 0);
     //av_dict_set(&codec_options, "rtsp_transport", "udp", 0);
-    av_dict_set(&codec_options, "preset", "veryfast", 0);
-    if (codec->id == AV_CODEC_ID_H264) {
-        av_dict_set(&codec_options, "profile", "high", 0);
-    }
+    //ultrafast superfast veryfast faster fast medium – default preset
+    //crt for controlling the quality [0,51]: 23 default with exponential effect on bit rate. 
+    //crt 17 visually lossless & 28 nearly half the bitrate
+    av_dict_set(&codec_options, "preset", "ultrafast", 0);
+
+    //if (codec->id == AV_CODEC_ID_H264) {
+    //    // some old/obsolete devices use baseline/main profile. 
+    //    // most modern devices support modern high profiles
+    //    av_dict_set(&codec_options, "profile", "high", 0); 
+    //}
     // open video encoder
     int ret = avcodec_open2(codec_ctx, codec, &codec_options);
     if (ret<0) {
@@ -351,13 +432,26 @@ void RtspStreaming::ClearConfig()
     if (IsStreaming())
         StopStreaming();
 
+    init_rtsp_header = false;
     Debug::Log("RtspStreaming configuration resetted");
     configured = false;
 }
 
 void RtspStreaming::SetCodecParams(AVFormatContext* fctx, AVCodecContext* codec_ctx)
 {
-    codec_ctx->bit_rate = 900000;
+    //https://support.google.com/youtube/answer/2853702?hl=en#zippy=%2Cp%2Cp-fps
+    if (height <= 240)
+        codec_ctx->bit_rate = 400 * 1000;       //400 kbps
+    else if (height <= 360)
+        codec_ctx->bit_rate = 700 * 1000;  // 700 Kbps
+    else if (height <= 480)
+        codec_ctx->bit_rate = 1 * 1000 * 1000;  //1000 Kbps
+    else if (height <= 720)
+        codec_ctx->bit_rate = 2 * 1000 * 1000;  //2000 Kbps
+    else
+        codec_ctx->bit_rate = 4 * 1000 * 1000;  //6000 Kbps
+    codec_ctx->bit_rate_tolerance = 2000;
+	
     //codec_ctx->bit_rate_tolerance = 0;
     //codec_ctx->rc_buffer_size = 3000000;
     //codec_ctx->rc_max_rate = 1200000;
@@ -367,9 +461,9 @@ void RtspStreaming::SetCodecParams(AVFormatContext* fctx, AVCodecContext* codec_
     //codec_ctx->codec_type = AVMEDIA_TYPE_VIDEO;
     codec_ctx->width = width;
     codec_ctx->height = height;
-    codec_ctx->gop_size = 12;
-    //codec_ctx->gop_size = 40;
-    //codec_ctx->max_b_frames = 3;
+    codec_ctx->gop_size = 12;       //emit one I-frame in every 12 frames at most
+    //codec_ctx->gop_size = stream_fps / 2;
+    codec_ctx->max_b_frames = 2;
     codec_ctx->pix_fmt = target_pix_fmt;
     codec_ctx->framerate = { stream_fps, 1 };
     codec_ctx->time_base = { 1, stream_fps};
@@ -378,3 +472,14 @@ void RtspStreaming::SetCodecParams(AVFormatContext* fctx, AVCodecContext* codec_
         codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     }
 }
+
+//void RtspStreaming::SetEncryptionOptions(bool encrypt, const char* key, const char* iv)
+//{
+//    encryption_enabled = encrypt;
+//    enc_key = key;
+//    enc_iv = iv;
+//
+//    aves = av_aes_alloc();
+//
+//    av_aes_init(aves, (uint8_t*)key, 128, 0);
+//}
