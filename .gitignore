@@ -29,3 +29,5 @@ sysinfo.txt
 /Assets/Extensions*
 /*.log
 .vs/*
+.vsconfig
+Logs/
